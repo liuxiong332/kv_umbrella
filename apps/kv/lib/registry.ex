@@ -6,8 +6,8 @@ defmodule KV.Registry do
   @doc """
     start the registry.
   """
-  def start_link(options \\ []) do
-    GenServer.start_link(__MODULE__, :ok, options)
+  def start_link(event_manager, options \\ []) do
+    GenServer.start_link(__MODULE__, event_manager, options)
   end
 
   @doc """
@@ -31,25 +31,26 @@ defmodule KV.Registry do
 
   # cLIENT api
 
-  def init(:ok) do
+  def init(event_manager) do
     names = HashDict.new
     refs = HashDict.new
-    {:ok, {names, refs}}
+    {:ok, %{names: names, refs: refs, events: event_manager}}
   end
 
-  def handle_call({:lookup, name}, _from, {dict, refs}) do
-    {:reply, HashDict.fetch(dict, name), {dict, refs}}
+  def handle_call({:lookup, name}, _from, state) do
+    {:reply, HashDict.fetch(state.names, name), state}
   end
 
-  def handle_cast({:create, name}, {dict, refs}) do
-    if HashDict.has_key?(dict, name) do
-      {:noreply, {dict, refs}}
+  def handle_cast({:create, name}, state) do
+    if HashDict.has_key?(state.names, name) do
+      {:noreply, state}
     else
       {:ok, bucket} = KV.Bucket.start_link
       ref = Process.monitor(bucket)
-      names = HashDict.put(dict, name, bucket)
-      refs = HashDict.put(refs, ref, name)
-      {:noreply, {names, refs}}
+      names = HashDict.put(state.names, name, bucket)
+      refs = HashDict.put(state.refs, ref, name)
+      GenEvent.sync_notify(state.events, {:create, name, bucket})
+      {:noreply, %{state | names: names, refs: refs}}
     end
   end
 
@@ -57,9 +58,10 @@ defmodule KV.Registry do
     {:stop, :normal, :ok, state}
   end
 
-  def handle_info({:DOWN, ref, :process, pid, :normal}, {names, refs}) do
-     {name, refs} = HashDict.pop(refs, ref)
-     names = HashDict.delete(names, name)
-     {:noreply, {names, refs}}
+  def handle_info({:DOWN, ref, :process, pid, :normal}, state) do
+     {name, refs} = HashDict.pop(state.refs, ref)
+     names = HashDict.delete(state.names, name)
+     GenEvent.sync_notify(state.events, {:exit, name, pid})
+     {:noreply, %{state | names: names, refs: refs}}
   end
 end

@@ -2,8 +2,20 @@ defmodule KV.RegistryTest do
   use ExUnit.Case, async: true
   alias KV.Registry
 
+  defmodule EventHandler do
+    use GenEvent
+
+    def handle_event(event, parent) do
+      send(parent, event)
+      {:ok, parent}
+    end
+  end
+
   setup do
-    {:ok, registry} = KV.Registry.start_link
+    {:ok, events} = GenEvent.start_link
+    GenEvent.add_mon_handler(events, EventHandler, self())
+
+    {:ok, registry} = KV.Registry.start_link(events)
     {:ok, registry: registry}
   end
 
@@ -20,5 +32,14 @@ defmodule KV.RegistryTest do
 
     KV.Bucket.stop(bucket)
     assert :error = Registry.lookup(registry, "name")
+  end
+
+  test "test event handler", %{registry: registry} do
+    Registry.create(registry, "name")
+    assert {:ok, bucket} = Registry.lookup(registry, "name")
+    assert_receive {:create, "name", bucket}
+
+    KV.Bucket.stop(bucket)
+    assert_receive {:exit, "name", bucket}
   end
 end

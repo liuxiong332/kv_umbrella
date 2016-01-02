@@ -7,7 +7,6 @@ defmodule KV.Registry do
     start the registry.
   """
   def start_link(event_manager, buckets, table, options \\ []) do
-    IO.puts inspect(table)
     GenServer.start_link(__MODULE__, {event_manager, buckets, table}, options)
   end
 
@@ -33,9 +32,11 @@ defmodule KV.Registry do
   # cLIENT api
 
   def init({event_manager, buckets, table}) do
-    refs = HashDict.new
-    ets = :ets.new(table, [:named_table, read_concurrency: true])
-    {:ok, %{refs: refs, events: event_manager, buckets: buckets, ets: ets}}
+    monitor_fn = fn {name, bucket}, acc ->
+      HashDict.put(acc, Process.monitor(bucket), name)
+    end
+    refs = :ets.foldl(monitor_fn, HashDict.new, table)
+    {:ok, %{refs: refs, events: event_manager, buckets: buckets, ets: table}}
   end
 
   def handle_call({:lookup, name}, _from, state) do

@@ -11,12 +11,18 @@ defmodule KV.RegistryTest do
     end
   end
 
-  setup do
+  defp start_registry(ets) do
     {:ok, events} = GenEvent.start_link
     GenEvent.add_mon_handler(events, EventHandler, self())
     {:ok, supervisor} = KV.Bucket.Supervisor.start_link
-    {:ok, registry} = KV.Registry.start_link(events, supervisor, :registry_table)
-    {:ok, registry: registry}
+    {:ok, registry} = KV.Registry.start_link(events, supervisor, ets)
+    registry
+  end
+
+  setup do
+    ets = :ets.new(:registry_table, [:set, :public])
+    registry = start_registry(ets)
+    {:ok, registry: registry, ets: ets}
   end
 
   test "lookup and create bucket in registry", %{registry: registry} do
@@ -41,5 +47,20 @@ defmodule KV.RegistryTest do
 
     KV.Bucket.stop(bucket)
     assert_receive {:exit, "name", ^bucket}
+  end
+
+  test "monitor the existing bucket", %{registry: registry, ets: ets} do
+    Registry.create(registry, "name")
+    assert {:ok, _} = Registry.lookup(registry, "name")
+
+    Process.unlink(registry)
+    Process.exit(registry, :shutdown)
+
+    registry = start_registry(ets)
+    assert {:ok, bucket} = Registry.lookup(registry, "name")
+
+    Agent.stop(bucket)
+    assert_receive {:exit, "name", ^bucket}
+    assert :error = Registry.lookup(registry, "name")
   end
 end

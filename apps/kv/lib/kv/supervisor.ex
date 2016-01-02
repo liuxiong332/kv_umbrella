@@ -11,10 +11,12 @@ defmodule KV.Supervisor do
   end
 
   def init(:ok) do
+    ets = :ets.new(@ets_registry_name, [:set, :public, :named_table, read_concurrency: true])
+
     children = [
       worker(GenEvent, [[name: @event_name]]),
       supervisor(KV.Bucket.Supervisor, [[name: @bucket_sup_name]]),
-      worker(KV.Registry, [@event_name, @bucket_sup_name, @ets_registry_name, [name: @registry_name]])
+      worker(KV.Registry, [@event_name, @bucket_sup_name, ets, [name: @registry_name]])
     ]
     supervise(children, strategy: :one_for_one)
   end

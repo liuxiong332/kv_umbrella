@@ -12,7 +12,7 @@ defmodule KVServer do
     children = [
       # Define workers and child supervisors to be supervised
       # worker(KVServer.Worker, [arg1, arg2, arg3]),
-      worker(Task, [KVServer, :accept]),
+      worker(Task, [KVServer, :accept, []]),
       supervisor(Task.Supervisor, [[name: @task_supervisor_name]])
     ]
 
@@ -22,21 +22,38 @@ defmodule KVServer do
     Supervisor.start_link(children, opts)
   end
 
-  def accept do
+  def accept() do
     {:ok, socket} = :gen_tcp.listen(@listen_port, [:binary, active: false, packet: :line])
     accept_loop(socket)
   end
 
   def accept_loop(socket) do
     {:ok, client_socket} = :gen_tcp.accept(socket)
-    {:ok, task_id} = Task.Supervisor.start_child(@task_supervisor_name, fn -> serve(client_socket))
+    {:ok, task_id} = Task.Supervisor.start_child(@task_supervisor_name,
+      fn -> serve(client_socket) end)
     :gen_tcp.controlling_process(client_socket, task_id)
     accept_loop(socket)
   end
 
   def serve(socket) do
-    {:ok, packet} = :gen_tcp.recv(socket, 0)
-    :gen_tcp.send(socket, packet)
+    res = case :gen_tcp.recv(socket, 0) do
+      {:ok, packet} ->
+        case KVServer.Command.parse(packet) do
+          {:ok, command} -> KVServer.Command.run(command)
+          {:error, _} = err -> err
+        end
+      {:error, _} = error -> error
+    end
+    write_line(socket, res)
     serve(socket)
   end
+
+  def write_line(socket, msg) do
+    :gen_tcp.send(socket, format_msg(msg))
+  end
+
+  defp format_msg({:ok, text}), do: text
+  defp format_msg({:error, :unknown_command}), do: "UNKNOWN COMMAND\r\n"
+  defp format_msg({:error, :not_found}), do: "ERROR NOT FOUND\r\n"
+  defp format_msg({:error, _}), do: "ERROR\r\n"
 end

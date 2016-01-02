@@ -3,10 +3,16 @@ defmodule KVServerTest do
   doctest KVServer
 
   setup do
+    Logger.remove_backend(:console)
+    Application.stop(:kv)
+    :ok = Application.start(:kv)
+    Logger.add_backend(:console, flush: true)
+
     opts = [:binary, packet: :line, active: false]
     {:ok, socket} = :gen_tcp.connect('localhost', 5678, opts)
     {:ok, socket: socket}
   end
+
   test "the truth", %{socket: socket} do
     assert send_and_recv(socket, "UNKNOWN shopping\r\n") == "UNKNOWN COMMAND\r\n"
     assert send_and_recv(socket, "GET shopping milk\r\n") == "ERROR NOT FOUND\r\n"
